@@ -1,0 +1,30 @@
+openapi: 3.0.0
+info:
+  title: Smol-crypto-API
+  version: 1.0.0
+  description: API for cryptocurrency application (made for training purposes)
+paths:
+  /v1/crypto/price/{symbol}:
+    get:
+      summary: Get current price for a cryptocurrency
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  price:
+                    type: number
+                  timestamp:
+                    type: string
+                    format: date-time

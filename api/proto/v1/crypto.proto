@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package crypto.v1;
+option go_package = "github.com/1337Bart/smol-crypto-api/api/proto/v1;cryptopb";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+service CryptoService {
+  rpc GetCurrentPrice(GetCurrentPriceRequest) returns (GetCurrentPriceResponse) {
+    option (google.api.http) = {
+      get: "/v1/crypto/price/{symbol}"
+    };
+  }
+
+  rpc GetBatchPrices(GetBatchPricesRequest) returns (GetBatchPricesResponse) {
+    option (google.api.http) = {
+      get: "/v1/crypto/prices"
+    };
+  }
+}
+
+message GetCurrentPriceRequest {
+  string symbol = 1;
+}
+
+message GetCurrentPriceResponse {
+  string symbol = 1;
+  double price_usd = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+message GetBatchPricesRequest {
+  repeated string symbols = 1;
+}
+
+message GetBatchPricesResponse {
+  repeated PriceData prices = 1;
+}
+
+message PriceData {
+  string symbol = 1;
+  double price_usd = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
