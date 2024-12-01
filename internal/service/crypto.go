@@ -3,83 +3,77 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/1337Bart/smol-crypto-api/internal/client/coingecko"
-	"github.com/1337Bart/smol-crypto-api/internal/model"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/postgres"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/redis"
+	"log"
+	"time"
 )
 
-type CryptoService struct {
-	cgClient   *coingecko.Client
-	pgRepo     *postgres.CryptoRepository
-	redisCache *redis.CryptoCache
+const (
+	cacheTTLinHours = 4
+)
+
+type CryptoUpdateService struct {
+	gecko      *coingecko.CoinGeckoClient
+	cache      redis.CryptoCache
+	repository postgres.CryptoRepository
+	coinIDs    []string
 }
 
-func NewCryptoService(
-	cgClient *coingecko.Client,
-	pgRepo *postgres.CryptoRepository,
-	redisCache *redis.CryptoCache,
-) *CryptoService {
-	return &CryptoService{
-		cgClient:   cgClient,
-		pgRepo:     pgRepo,
-		redisCache: redisCache,
+func NewCryptoUpdateService(cache redis.CryptoCache, repository postgres.CryptoRepository, coinIDs []string) *CryptoUpdateService {
+	return &CryptoUpdateService{
+		gecko:      coingecko.NewCoinGeckoClient(),
+		cache:      cache,
+		repository: repository,
+		coinIDs:    coinIDs,
 	}
 }
 
-func (s *CryptoService) GetCurrentPrice(ctx context.Context, symbol string) (*model.CryptoPrice, error) {
-	// Try cache first
-	if price, err := s.redisCache.GetPrice(ctx, symbol); err == nil {
-		return price, nil
+func (s *CryptoUpdateService) StartPeriodicUpdates(ctx context.Context) {
+	ticker := time.NewTicker(4 * time.Hour)
+	defer ticker.Stop()
+
+	if err := s.updatePrices(ctx); err != nil {
+		log.Printf("Initial price update failed: %v", err)
 	}
 
-	// If not in cache, get from external API
-	price, err := s.cgClient.GetCurrentPrice(ctx, symbol)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.updatePrices(ctx); err != nil {
+				log.Printf("Price update failed: %v", err)
+				continue
+			}
+		}
+	}
+}
+
+// testing one-time update, in prod this will be replaced by StartPeriodicUpdates
+func (s *CryptoUpdateService) UpdateCryptosSingle(ctx context.Context) {
+	if err := s.updatePrices(ctx); err != nil {
+		log.Printf("Initial price update failed: %v", err)
+	}
+}
+
+func (s *CryptoUpdateService) updatePrices(ctx context.Context) error {
+	cryptoData, err := s.gecko.FetchRecentCoinsData()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get price from CoinGecko: %w", err)
+		return fmt.Errorf("failed to fetch cryptoData: %w", err)
 	}
 
-	// Store in cache and database
-	if err := s.redisCache.SetPrice(ctx, price); err != nil {
-		// Log error but don't fail the request
-		fmt.Printf("failed to cache price: %v\n", err)
+	// Store in Redis (hot data)
+	if err := s.cache.BatchSave(ctx, cryptoData); err != nil {
+		log.Printf("Failed to store cryptoData in Redis: %v", err)
+		// Continue execution even if Redis fails
 	}
 
-	if err := s.pgRepo.SavePrice(ctx, price); err != nil {
-		fmt.Printf("failed to save price to database: %v\n", err)
+	// Store in PostgreSQL (historical data)
+	if err := s.repository.BatchSave(ctx, cryptoData); err != nil {
+		return fmt.Errorf("failed to store cryptoData in PostgreSQL: %w", err)
 	}
 
-	return price, nil
-}
-
-func (s *CryptoService) GetHistoricalPrices(ctx context.Context, symbol string, from, to time.Time) ([]*model.CryptoPrice, error) {
-	// Try database first
-	prices, err := s.pgRepo.GetPriceHistory(ctx, symbol, from, to)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get historical prices: %w", err)
-	}
-
-	return prices, nil
-}
-
-func (s *CryptoService) GetTopCryptos(ctx context.Context, limit int) ([]*model.CryptoPrice, error) {
-	// Try cache first
-	if prices, err := s.redisCache.GetTopCryptos(ctx, limit); err == nil {
-		return prices, nil
-	}
-
-	// If not in cache, get from external API
-	prices, err := s.cgClient.GetTopCryptos(ctx, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get top cryptos: %w", err)
-	}
-
-	// Store in cache
-	if err := s.redisCache.SetTopCryptos(ctx, prices); err != nil {
-		fmt.Printf("failed to cache top cryptos: %v\n", err)
-	}
-
-	return prices, nil
+	return nil
 }

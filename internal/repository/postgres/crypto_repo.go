@@ -3,95 +3,127 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"time"
-
 	"github.com/1337Bart/smol-crypto-api/internal/model"
+	"log"
+	"time"
 )
 
-type CryptoRepository struct {
+// todo - nietestowane
+
+type CryptoRepository interface {
+	SaveOne(ctx context.Context, crypto *model.CryptoData) error
+	GetByID(ctx context.Context, id string, timestamp time.Time) (*model.CryptoData, error)
+	GetLatestByID(ctx context.Context, id string) (*model.CryptoData, error)
+	//GetTimeRange(ctx context.Context, id string, start, end time.Time) ([]model.CryptoData, error)
+	BatchSave(ctx context.Context, prices []model.CryptoData) error
+}
+
+type cryptoRepository struct {
 	db *sql.DB
 }
 
-func NewCryptoRepository(db *sql.DB) *CryptoRepository {
-	return &CryptoRepository{db: db}
+func NewCryptoRepository(db *sql.DB) CryptoRepository {
+	return &cryptoRepository{db: db}
 }
 
-func (r *CryptoRepository) SavePrice(ctx context.Context, price *model.CryptoPrice) error {
-	query := ` 
-        INSERT INTO crypto_prices (symbol, price, timestamp) 
-        VALUES ($1, $2, $3) 
-        ON CONFLICT (symbol, timestamp) DO UPDATE 
-        SET price = EXCLUDED.price 
-    `
+func (r *cryptoRepository) SaveOne(ctx context.Context, crypto *model.CryptoData) error {
+	query := `  
+        INSERT INTO crypto_prices (  
+            id, symbol, name, timestamp, current_price, high_24h, low_24h,  
+            total_volume, market_cap, market_rank, price_change_24h,  
+            price_change_percentage_24h, circulating_supply, total_supply  
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
-	_, err := r.db.ExecContext(ctx, query, price.Symbol, price.PriceUSD, price.Timestamp)
-	if err != nil {
-		return fmt.Errorf("failed to save price: %w", err)
-	}
+	_, err := r.db.ExecContext(ctx, query,
+		crypto.ID, crypto.Symbol, crypto.Name, crypto.Timestamp, crypto.CurrentPrice,
+		crypto.High24h, crypto.Low24h, crypto.TotalVolume, crypto.MarketCap,
+		crypto.MarketRank, crypto.PriceChange24h, crypto.PriceChangePercent24h,
+		crypto.CirculatingSupply, crypto.TotalSupply)
 
-	return nil
+	return err
 }
 
-func (r *CryptoRepository) GetPriceHistory(ctx context.Context, symbol string, from, to time.Time) ([]*model.CryptoPrice, error) {
-	query := ` 
-        SELECT symbol, price, timestamp 
-        FROM crypto_prices 
-        WHERE symbol = $1 AND timestamp BETWEEN $2 AND $3 
-        ORDER BY timestamp DESC 
-    `
-
-	rows, err := r.db.QueryContext(ctx, query, symbol, from, to)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query price history: %w", err)
-	}
-	defer rows.Close()
-
-	var prices []*model.CryptoPrice
-	for rows.Next() {
-		price := &model.CryptoPrice{}
-		err := rows.Scan(&price.Symbol, &price.PriceUSD, &price.Timestamp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan price row: %w", err)
-		}
-		prices = append(prices, price)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating price rows: %w", err)
-	}
-
-	return prices, nil
-}
-
-func (r *CryptoRepository) SaveBatchPrices(ctx context.Context, prices []*model.CryptoPrice) error {
+func (r *cryptoRepository) BatchSave(ctx context.Context, prices []model.CryptoData) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return err
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, ` 
-        INSERT INTO crypto_prices (symbol, price, timestamp) 
-        VALUES ($1, $2, $3) 
-        ON CONFLICT (symbol, timestamp) DO UPDATE 
-        SET price = EXCLUDED.price 
+	stmt, err := tx.PrepareContext(ctx, `   
+        INSERT INTO crypto_prices (   
+            id, symbol, name, timestamp, current_price, high_24h, low_24h,   
+            total_volume, market_cap, market_rank, price_change_24h,   
+            price_change_percentage_24h, circulating_supply, total_supply   
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)   
     `)
 	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
+		return err
 	}
 	defer stmt.Close()
 
-	for _, price := range prices {
-		_, err = stmt.ExecContext(ctx, price.Symbol, price.PriceUSD, price.Timestamp)
+	for n, price := range prices {
+		_, err := stmt.ExecContext(ctx,
+			price.ID, price.Symbol, price.Name, price.Timestamp,
+			price.CurrentPrice, price.High24h, price.Low24h,
+			price.TotalVolume, price.MarketCap, price.MarketRank,
+			price.PriceChange24h, price.PriceChangePercent24h,
+			price.CirculatingSupply, price.TotalSupply,
+		)
+
+		if n%10 == 0 {
+			log.Printf("Inserted %d out of %d, records", n, len(prices))
+		}
+
 		if err != nil {
-			return fmt.Errorf("failed to execute statement: %w", err)
+			log.Printf("Error inserting crypto %s (%s): %v", price.Name, price.ID, err)
+			log.Printf("Values: current_price=%.8f, market_cap=%.2f, total_volume=%.2f",
+				price.CurrentPrice, price.MarketCap, price.TotalVolume)
+			return err
 		}
 	}
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
+	return tx.Commit()
+}
 
-	return nil
+// GetByID retrieves a crypto price record for a specific ID and timestamp
+func (r *cryptoRepository) GetByID(ctx context.Context, id string, timestamp time.Time) (*model.CryptoData, error) {
+	query := `  
+        SELECT * FROM crypto_prices   
+        WHERE id = $1 AND timestamp = $2`
+
+	crypto := &model.CryptoData{}
+	err := r.db.QueryRowContext(ctx, query, id, timestamp).Scan(
+		&crypto.ID, &crypto.Symbol, &crypto.Name, &crypto.Timestamp,
+		&crypto.CurrentPrice, &crypto.High24h, &crypto.Low24h,
+		&crypto.TotalVolume, &crypto.MarketCap, &crypto.MarketRank,
+		&crypto.PriceChange24h, &crypto.PriceChangePercent24h,
+		&crypto.CirculatingSupply, &crypto.TotalSupply)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return crypto, err
+}
+
+// GetLatestByID retrieves the most recent price for a crypto
+func (r *cryptoRepository) GetLatestByID(ctx context.Context, id string) (*model.CryptoData, error) {
+	query := `  
+        SELECT * FROM crypto_prices   
+        WHERE id = $1   
+        ORDER BY timestamp DESC   
+        LIMIT 1`
+
+	crypto := &model.CryptoData{}
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&crypto.ID, &crypto.Symbol, &crypto.Name, &crypto.Timestamp,
+		&crypto.CurrentPrice, &crypto.High24h, &crypto.Low24h,
+		&crypto.TotalVolume, &crypto.MarketCap, &crypto.MarketRank,
+		&crypto.PriceChange24h, &crypto.PriceChangePercent24h,
+		&crypto.CirculatingSupply, &crypto.TotalSupply)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return crypto, err
 }

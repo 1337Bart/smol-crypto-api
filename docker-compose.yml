@@ -1,19 +1,16 @@
-version: '3.8'
-
 services:
-  app:
-    build: .
-    ports:
-      - "8080:8080"  # REST
-      - "9090:9090"  # gRPC
-    environment:
-      - POSTGRES_HOST=postgres
-      - REDIS_HOST=redis
-      - ENVIRONMENT=development
-    depends_on:
-      - postgres
-      - redis
-
+#  app:
+#    build: .
+#    ports:
+#      - "8080:8080"  # REST
+#      - "9090:9090"  # gRPC
+#    environment:
+#      - POSTGRES_HOST=postgres
+#      - REDIS_HOST=redis
+#      - ENVIRONMENT=development
+#    depends_on:
+#      - postgres
+#      - redis
   postgres:
     image: postgres:15-alpine
     environment:
@@ -31,7 +28,27 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - app-network
+
+  redisinsight:
+    image: redislabs/redisinsight:1.13.1
+    container_name: redisinsight
+    ports:
+      - "8001:8001"
+    environment:
+      - REDISINSIGHT_HOST=0.0.0.0
+      - REDISINSIGHT_PORT=8001
+    volumes:
+      - redisinsight:/db
+    networks:
+      - app-network
 
 volumes:
   postgres_data:
   redis_data:
+  redisinsight:
+
+networks:
+  app-network:
+    driver: bridge

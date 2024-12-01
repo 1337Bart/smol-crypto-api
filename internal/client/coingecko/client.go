@@ -1,208 +1,100 @@
 package coingecko
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/1337Bart/smol-crypto-api/internal/model"
+	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
 const (
 	baseURL              = "https://api.coingecko.com/api/v3"
-	simplePriceEndpoint  = "/simple/price"
 	coinsMarketsEndpoint = "/coins/markets"
 )
 
-type Client struct {
-	httpClient *http.Client
-	baseURL    string
+type CoinGeckoClient struct {
+	client  *http.Client
+	baseURL string
 }
 
-type PriceResponse map[string]map[string]float64
-
-type MarketData struct {
-	ID                       string    `json:"id"`
-	Symbol                   string    `json:"symbol"`
-	Name                     string    `json:"name"`
-	CurrentPrice             float64   `json:"current_price"`
-	MarketCap                float64   `json:"market_cap"`
-	Volume24h                float64   `json:"total_volume"`
-	PriceChange24h           float64   `json:"price_change_24h"`
-	PriceChangePercentage24h float64   `json:"price_change_percentage_24h"`
-	LastUpdated              time.Time `json:"last_updated"`
-}
-
-func NewClient(timeout time.Duration) *Client {
-	return &Client{
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
+func NewCoinGeckoClient() *CoinGeckoClient {
+	return &CoinGeckoClient{
+		client:  &http.Client{Timeout: 30 * time.Second},
 		baseURL: baseURL,
 	}
 }
 
-// GetBatchPrices fetches prices for multiple cryptocurrencies in one call
-func (c *Client) GetBatchPrices(ctx context.Context, ids []string, vsCurrency string) (PriceResponse, error) {
-	url := fmt.Sprintf("%s%s?ids=%s&vs_currencies=%s",
-		c.baseURL,
-		simplePriceEndpoint,
-		strings.Join(ids, ","),
-		vsCurrency,
-	)
+// CoinGeckoResponse represents the raw response from CoinGecko
+type CoinGeckoResponse []struct {
+	ID                       string  `json:"id"`
+	Symbol                   string  `json:"symbol"`
+	Name                     string  `json:"name"`
+	CurrentPrice             float64 `json:"current_price"`
+	MarketCap                float64 `json:"market_cap"`
+	MarketCapRank            int     `json:"market_cap_rank"`
+	TotalVolume              float64 `json:"total_volume"`
+	High24h                  float64 `json:"high_24h"`
+	Low24h                   float64 `json:"low_24h"`
+	PriceChange24h           float64 `json:"price_change_24h"`
+	PriceChangePercentage24h float64 `json:"price_change_percentage_24h"`
+	CirculatingSupply        float64 `json:"circulating_supply"`
+	TotalSupply              float64 `json:"total_supply"`
+	LastUpdated              string  `json:"last_updated"`
+}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
+// FetchRecentCoinsData gets top 250 coins by market cap
+// batching request to save on API calls
+func (c *CoinGeckoClient) FetchRecentCoinsData() ([]model.CryptoData, error) {
+	url := fmt.Sprintf("%s/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h&locale=en",
+		c.baseURL)
 
-	resp, err := c.httpClient.Do(req)
+	// Make the request
+	resp, err := c.client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
+		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Check response status
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("bad status: %d, body: %s", resp.StatusCode, string(body))
 	}
 
-	var priceResponse PriceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&priceResponse); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
+	// Decode the response
+	var geckoResp CoinGeckoResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geckoResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return priceResponse, nil
-}
-
-// GetMarketData fetches comprehensive market data for multiple cryptocurrencies
-func (c *Client) GetMarketData(ctx context.Context, vsCurrency string, ids []string, perPage int) ([]MarketData, error) {
-	url := fmt.Sprintf("%s%s?vs_currency=%s&ids=%s&order=market_cap_desc&per_page=%d&sparkline=false",
-		c.baseURL,
-		coinsMarketsEndpoint,
-		vsCurrency,
-		strings.Join(ids, ","),
-		perPage,
-	)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var marketData []MarketData
-	if err := json.NewDecoder(resp.Body).Decode(&marketData); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-
-	return marketData, nil
-}
-
-// RetryableClient wraps the basic client with retry functionality
-type RetryableClient struct {
-	client      *Client
-	maxRetries  int
-	backoffBase time.Duration
-}
-
-func NewRetryableClient(timeout time.Duration, maxRetries int, backoffBase time.Duration) *RetryableClient {
-	return &RetryableClient{
-		client:      NewClient(timeout),
-		maxRetries:  maxRetries,
-		backoffBase: backoffBase,
-	}
-}
-
-func (rc *RetryableClient) GetBatchPricesWithRetry(ctx context.Context, ids []string, vsCurrency string) (PriceResponse, error) {
-	var lastErr error
-	for attempt := 0; attempt < rc.maxRetries; attempt++ {
-		prices, err := rc.client.GetBatchPrices(ctx, ids, vsCurrency)
-		if err == nil {
-			return prices, nil
+	// Transform to our CryptoData model
+	prices := make([]model.CryptoData, len(geckoResp))
+	for i, coin := range geckoResp {
+		// Parse the timestamp
+		timestamp, err := time.Parse(time.RFC3339, coin.LastUpdated)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse timestamp for %s: %w", coin.ID, err)
 		}
 
-		lastErr = err
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(rc.backoffBase * time.Duration(attempt+1)):
-			continue
+		prices[i] = model.CryptoData{
+			ID:                    coin.ID,
+			Symbol:                coin.Symbol,
+			Name:                  coin.Name,
+			Timestamp:             timestamp,
+			CurrentPrice:          coin.CurrentPrice,
+			High24h:               coin.High24h,
+			Low24h:                coin.Low24h,
+			TotalVolume:           coin.TotalVolume,
+			MarketCap:             coin.MarketCap,
+			MarketRank:            coin.MarketCapRank,
+			PriceChange24h:        coin.PriceChange24h,
+			PriceChangePercent24h: coin.PriceChangePercentage24h,
+			CirculatingSupply:     coin.CirculatingSupply,
+			TotalSupply:           coin.TotalSupply,
 		}
 	}
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
-}
 
-func (rc *RetryableClient) GetMarketDataWithRetry(ctx context.Context, vsCurrency string, ids []string, perPage int) ([]MarketData, error) {
-	var lastErr error
-	for attempt := 0; attempt < rc.maxRetries; attempt++ {
-		data, err := rc.client.GetMarketData(ctx, vsCurrency, ids, perPage)
-		if err == nil {
-			return data, nil
-		}
-
-		lastErr = err
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(rc.backoffBase * time.Duration(attempt+1)):
-			continue
-		}
-	}
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
-}
-
-// RateLimitedClient adds rate limiting to the retryable client
-type RateLimitedClient struct {
-	*RetryableClient
-	rateLimiter chan struct{}
-}
-
-func NewRateLimitedClient(timeout time.Duration, maxRetries int, backoffBase time.Duration, requestsPerMinute int) *RateLimitedClient {
-	client := &RateLimitedClient{
-		RetryableClient: NewRetryableClient(timeout, maxRetries, backoffBase),
-		rateLimiter:     make(chan struct{}, requestsPerMinute),
-	}
-
-	// Refill rate limiter
-	go func() {
-		ticker := time.NewTicker(time.Minute / time.Duration(requestsPerMinute))
-		defer ticker.Stop()
-
-		for range ticker.C {
-			select {
-			case client.rateLimiter <- struct{}{}:
-			default:
-			}
-		}
-	}()
-
-	return client
-}
-
-func (rlc *RateLimitedClient) GetBatchPrices(ctx context.Context, ids []string, vsCurrency string) (PriceResponse, error) {
-	select {
-	case <-rlc.rateLimiter:
-		return rlc.RetryableClient.GetBatchPricesWithRetry(ctx, ids, vsCurrency)
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (rlc *RateLimitedClient) GetMarketData(ctx context.Context, vsCurrency string, ids []string, perPage int) ([]MarketData, error) {
-	select {
-	case <-rlc.rateLimiter:
-		return rlc.RetryableClient.GetMarketDataWithRetry(ctx, vsCurrency, ids, perPage)
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return prices, nil
 }
