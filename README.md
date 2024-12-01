@@ -11,3 +11,13 @@ INFO (get Redis server information)
 
 z docker-compose:
 http://localhost:8001/
+
+
+# Buf
+buf mod prune
+buf mod update
+buf generate
+
+# Curl
+curl "http://localhost:8080/api/v1/crypto?page=2&limit=20" 
+

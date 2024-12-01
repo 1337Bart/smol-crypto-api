@@ -9,13 +9,11 @@ import (
 	"time"
 )
 
-// todo - nietestowane
+const ttlInHours = 4
 
 type CryptoCache interface {
-	SaveOne(ctx context.Context, price *model.CryptoData) error
 	BatchSave(ctx context.Context, prices []model.CryptoData) error
-	Get(ctx context.Context, id string) (*model.CryptoData, error)
-	GetAll(ctx context.Context) ([]model.CryptoData, error)
+	GetAllCryptos(ctx context.Context) ([]model.CryptoData, error)
 }
 
 type cryptoCache struct {
@@ -26,26 +24,16 @@ type cryptoCache struct {
 func NewCryptoCache(client *redis.Client) CryptoCache {
 	return &cryptoCache{
 		client: client,
-		ttl:    4 * time.Hour,
+		ttl:    ttlInHours * time.Hour,
 	}
 }
 
-func (c *cryptoCache) SaveOne(ctx context.Context, price *model.CryptoData) error {
-	key := fmt.Sprintf("crypto:price:%s", price.ID)
-	data, err := json.Marshal(price)
-	if err != nil {
-		return fmt.Errorf("failed to marshal price data: %w", err)
-	}
-
-	return c.client.Set(ctx, key, data, c.ttl).Err()
-}
-
-func (c *cryptoCache) BatchSave(ctx context.Context, prices []model.CryptoData) error {
+func (c *cryptoCache) BatchSave(ctx context.Context, cryptos []model.CryptoData) error {
 	pipe := c.client.Pipeline()
 
-	for _, price := range prices {
-		key := fmt.Sprintf("crypto:price:%s", price.ID)
-		data, err := json.Marshal(price)
+	for _, crypto := range cryptos {
+		key := fmt.Sprintf("crypto:id:%s", crypto.ID)
+		data, err := json.Marshal(crypto)
 		if err != nil {
 			return fmt.Errorf("failed to marshal price data: %w", err)
 		}
@@ -57,32 +45,15 @@ func (c *cryptoCache) BatchSave(ctx context.Context, prices []model.CryptoData) 
 	return err
 }
 
-func (c *cryptoCache) Get(ctx context.Context, id string) (*model.CryptoData, error) {
-	key := fmt.Sprintf("crypto:price:%s", id)
-	data, err := c.client.Get(ctx, key).Bytes()
+// zrobic tu paginacje, zeby requesty byly jeszcze szybsze? zwrotka tylko tego, co paginacja potrzebuje
+func (c *cryptoCache) GetAllCryptos(ctx context.Context) ([]model.CryptoData, error) {
+	keys, err := c.client.Keys(ctx, "crypto:id:*").Result()
 	if err != nil {
-		if err == redis.Nil {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var price model.CryptoData
-	if err := json.Unmarshal(data, &price); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal price data: %w", err)
-	}
-
-	return &price, nil
-}
-
-func (c *cryptoCache) GetAll(ctx context.Context) ([]model.CryptoData, error) {
-	keys, err := c.client.Keys(ctx, "crypto:price:*").Result()
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get crypto keys: %w", err)
 	}
 
 	if len(keys) == 0 {
-		return []model.CryptoData{}, nil
+		return nil, fmt.Errorf("no crypto data found in cache")
 	}
 
 	pipe := c.client.Pipeline()
@@ -94,22 +65,23 @@ func (c *cryptoCache) GetAll(ctx context.Context) ([]model.CryptoData, error) {
 
 	_, err = pipe.Exec(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute pipeline: %w", err)
 	}
 
-	prices := make([]model.CryptoData, 0, len(keys))
+	cryptos := make([]model.CryptoData, 0, len(cmds))
 	for _, cmd := range cmds {
-		data, err := cmd.Bytes()
+		data, err := cmd.Result()
 		if err != nil {
 			continue
 		}
 
-		var price model.CryptoData
-		if err := json.Unmarshal(data, &price); err != nil {
+		var crypto model.CryptoData
+		if err := json.Unmarshal([]byte(data), &crypto); err != nil {
 			continue
 		}
-		prices = append(prices, price)
+
+		cryptos = append(cryptos, crypto)
 	}
 
-	return prices, nil
+	return cryptos, nil
 }

@@ -1,29 +1,22 @@
 package server
 
 import (
-	"context"
+	"fmt"
 	"net/http"
 
-	cryptov1 "github.com/1337Bart/smol-crypto-api/api/proto/v1"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/1337Bart/smol-crypto-api/internal/handlers/http_handler"
+	"github.com/go-chi/chi/v5"
 )
 
 func (s *Server) initHTTP() error {
-	ctx := context.Background()
-	mux := runtime.NewServeMux()
+	httpHandler := http_handler.NewCryptoHandler(*s.CryptoService)
+	router := chi.NewRouter()
 
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	endpoint := "localhost:" + s.cfg.Server.GRPCPort
+	router.Get("/api/v1/crypto", httpHandler.ListCryptos)
 
-	if err := cryptov1.RegisterCryptoServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
-		return err
-	}
-
-	s.httpServer = &http.Server{
-		Addr:    ":" + s.cfg.Server.HTTPPort,
-		Handler: mux,
+	s.HttpServer = &http.Server{
+		Addr:    fmt.Sprintf(":%s", s.Cfg.Server.HTTPPort),
+		Handler: router,
 	}
 
 	return nil

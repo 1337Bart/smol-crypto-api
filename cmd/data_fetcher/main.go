@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/1337Bart/smol-crypto-api/internal/config"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/postgres"
 	internal_redis "github.com/1337Bart/smol-crypto-api/internal/repository/redis"
 	"github.com/1337Bart/smol-crypto-api/internal/service"
@@ -15,30 +16,34 @@ import (
 
 func main() {
 	fmt.Println("Starting crypto data fetcher")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	redisAddr := fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port)
 	redisClient := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: redisAddr,
 	})
 
-	redisCache := internal_redis.NewCryptoCache(redisClient)
-
-	// todo remove hardcode
-	dbConfig := "host=localhost port=5432 user=crypto_app password=crypto_password dbname=crypto_db sslmode=disable"
+	dbConfig := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.User, cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode)
 	db, err := sql.Open("postgres", dbConfig)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
 
-	// Test the connection
 	err = db.Ping()
 	if err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
-
 	fmt.Println("Connected to database")
-	dbRepo := postgres.NewCryptoRepository(db)
 
-	cryptoService := service.NewCryptoUpdateService(redisCache, dbRepo, []string{})
+	redisCache := internal_redis.NewCryptoCache(redisClient)
+	postgresSQL := postgres.NewCryptoRepository(db)
+
+	cryptoService := service.NewCryptoService(redisCache, postgresSQL)
 
 	ctx := context.Background()
 

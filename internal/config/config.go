@@ -6,10 +6,9 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig
-	Database  DatabaseConfig
-	Redis     RedisConfig
-	CoinGecko CoinGeckoConfig
+	Server   ServerConfig
+	Database DatabaseConfig
+	Redis    RedisConfig
 }
 
 type ServerConfig struct {
@@ -33,12 +32,6 @@ type RedisConfig struct {
 	DB       int
 }
 
-type CoinGeckoConfig struct {
-	BaseURL     string
-	RateLimit   int
-	TimeoutSecs int
-}
-
 func Load() (*Config, error) {
 	return &Config{
 		Server: ServerConfig{
@@ -48,9 +41,9 @@ func Load() (*Config, error) {
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
 			Port:     getEnvAsString("DB_PORT", "5432"),
-			User:     getEnv("DB_USER", "postgres"),
-			Password: getEnv("DB_PASSWORD", "postgres"),
-			DBName:   getEnv("DB_NAME", "crypto_app"),
+			User:     getEnv("DB_USER", "crypto_app"),
+			Password: getEnv("DB_PASSWORD", "crypto_password"),
+			DBName:   getEnv("DB_NAME", "crypto_db"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
 		Redis: RedisConfig{
@@ -58,11 +51,6 @@ func Load() (*Config, error) {
 			Port:     getEnvAsString("REDIS_PORT", "6379"),
 			Password: getEnv("REDIS_PASSWORD", ""),
 			DB:       getEnvAsInt("REDIS_DB", 0),
-		},
-		CoinGecko: CoinGeckoConfig{
-			BaseURL:     getEnv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3"),
-			RateLimit:   getEnvAsInt("COINGECKO_RATE_LIMIT", 30),
-			TimeoutSecs: getEnvAsInt("COINGECKO_TIMEOUT_SECS", 10),
 		},
 	}, nil
 }

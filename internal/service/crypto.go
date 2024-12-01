@@ -3,34 +3,37 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/1337Bart/smol-crypto-api/internal/client/coingecko"
+	"github.com/1337Bart/smol-crypto-api/internal/coingecko_client"
+	"github.com/1337Bart/smol-crypto-api/internal/model"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/postgres"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/redis"
 	"log"
+	"sort"
 	"time"
 )
 
-const (
-	cacheTTLinHours = 4
-)
+type ICryptoService interface {
+	// coingecko operations
+	StartPeriodicUpdates(ctx context.Context)
+	UpdateCryptosSingle(ctx context.Context)
 
-type CryptoUpdateService struct {
-	gecko      *coingecko.CoinGeckoClient
-	cache      redis.CryptoCache
-	repository postgres.CryptoRepository
-	coinIDs    []string
+	// handler operations
+	ListCryptos(ctx context.Context, page, limit int) ([]model.CryptoData, int, error)
 }
 
-func NewCryptoUpdateService(cache redis.CryptoCache, repository postgres.CryptoRepository, coinIDs []string) *CryptoUpdateService {
-	return &CryptoUpdateService{
-		gecko:      coingecko.NewCoinGeckoClient(),
+type CryptoService struct {
+	cache      redis.CryptoCache
+	repository postgres.CryptoRepository
+}
+
+func NewCryptoService(cache redis.CryptoCache, repository postgres.CryptoRepository) *CryptoService {
+	return &CryptoService{
 		cache:      cache,
 		repository: repository,
-		coinIDs:    coinIDs,
 	}
 }
 
-func (s *CryptoUpdateService) StartPeriodicUpdates(ctx context.Context) {
+func (s *CryptoService) StartPeriodicUpdates(ctx context.Context) {
 	ticker := time.NewTicker(4 * time.Hour)
 	defer ticker.Stop()
 
@@ -52,14 +55,15 @@ func (s *CryptoUpdateService) StartPeriodicUpdates(ctx context.Context) {
 }
 
 // testing one-time update, in prod this will be replaced by StartPeriodicUpdates
-func (s *CryptoUpdateService) UpdateCryptosSingle(ctx context.Context) {
+func (s *CryptoService) UpdateCryptosSingle(ctx context.Context) {
 	if err := s.updatePrices(ctx); err != nil {
 		log.Printf("Initial price update failed: %v", err)
 	}
 }
 
-func (s *CryptoUpdateService) updatePrices(ctx context.Context) error {
-	cryptoData, err := s.gecko.FetchRecentCoinsData()
+func (s *CryptoService) updatePrices(ctx context.Context) error {
+	gecko := coingecko_client.NewCoinGeckoClient()
+	cryptoData, err := gecko.FetchRecentCoinsData()
 	if err != nil {
 		return fmt.Errorf("failed to fetch cryptoData: %w", err)
 	}
@@ -76,4 +80,54 @@ func (s *CryptoUpdateService) updatePrices(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+const (
+	pageCacheKeyFormat = "crypto:page:%d:%d" // Format: crypto:page:{pageNum}:{limit}
+	cacheDuration      = 4 * time.Hour
+)
+
+// to jest pojebane:
+// trzeba dopisac metody do repo/cache
+// poprawic syntax
+// chce wyciagac PER PAGE, a nie WSZYSTKO wiec to jest do zaorania
+// po co mi total wyników??
+func (s *CryptoService) ListCryptos(ctx context.Context, page, limit int) ([]model.CryptoData, int, error) {
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Try to get from Redis first (we'll get all data and paginate in memory since it's max 250 items)
+	cryptos, err := s.cache.GetAllCryptos(ctx)
+	if err == nil && len(cryptos) > 0 {
+		// Sort by market rank
+		sort.Slice(cryptos, func(i, j int) bool {
+			return cryptos[i].MarketRank < cryptos[j].MarketRank
+		})
+
+		// Calculate total and apply pagination
+		total := len(cryptos)
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+
+		if offset >= total {
+			return []model.CryptoData{}, total, nil
+		}
+
+		return cryptos[offset:end], total, nil
+	}
+
+	// If not in Redis, get from PostgreSQL
+	cryptos, err = s.repository.ListCryptos(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list cryptos from repository: %w", err)
+	}
+
+	// Sort by market rank
+	sort.Slice(cryptos, func(i, j int) bool {
+		return cryptos[i].MarketRank < cryptos[j].MarketRank
+	})
+
+	return cryptos, 250, nil // hardcoded total as we know it's always 250
 }

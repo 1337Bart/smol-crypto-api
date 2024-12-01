@@ -3,22 +3,24 @@ package server
 import (
 	"context"
 	cryptov1 "github.com/1337Bart/smol-crypto-api/api/proto/v1"
+	"github.com/1337Bart/smol-crypto-api/internal/handlers/grpc_handler"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
 
 func (s *Server) initGRPC() error {
+	grpcHandler := grpc_handler.NewCryptoHandler(*s.CryptoService)
+
 	server := grpc.NewServer(
 		grpc.UnaryInterceptor(s.unaryInterceptor()),
 	)
 
-	// Register services
-	cryptov1.RegisterCryptoServiceServer(server, s.cryptoSvc)
+	cryptov1.RegisterCryptoServiceServer(server, grpcHandler)
 
-	// Enable reflection for grpcurl
+	// Enable reflection for grpcurl - co to robi??
 	reflection.Register(server)
 
-	s.grpcServer = server
+	s.GrpcServer = server
 	return nil
 }
 

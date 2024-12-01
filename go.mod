@@ -5,9 +5,9 @@ go 1.22.7
 toolchain go1.22.9
 
 require (
+	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/golang-migrate/migrate/v4 v4.18.1
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.23.0
 	github.com/lib/pq v1.10.9
 	go.opentelemetry.io/otel/trace v1.32.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20241104194629-dd2ea8efbc28

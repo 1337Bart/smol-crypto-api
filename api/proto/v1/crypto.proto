@@ -3,43 +3,45 @@ syntax = "proto3";
 package crypto.v1;
 option go_package = "github.com/1337Bart/smol-crypto-api/api/proto/v1;cryptopb";
 
-import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
+// Message for pagination
+message PaginationRequest {
+  int32 page = 1;
+  int32 limit = 2;
+}
+
+// Crypto data message
+message Crypto {
+  string id = 1;
+  string symbol = 2;
+  string name = 3;
+  double current_price = 4;
+  double high_24h = 5;
+  double low_24h = 6;
+  double total_volume = 7;
+  double market_cap = 8;
+  int32 market_rank = 9;
+  double price_change_24h = 10;
+  double price_change_percentage_24h = 11;
+  double circulating_supply = 12;
+  double total_supply = 13;
+  string timestamp = 14;
+}
+
+// Request for listing cryptos
+message ListCryptosRequest {
+  PaginationRequest pagination = 1;
+}
+
+// Response for listing cryptos
+message ListCryptosResponse {
+  repeated Crypto cryptos = 1;
+  int32 total_count = 2;
+  int32 current_page = 3;
+}
+
+// Service definition
 service CryptoService {
-  rpc GetCurrentPrice(GetCurrentPriceRequest) returns (GetCurrentPriceResponse) {
-    option (google.api.http) = {
-      get: "/v1/crypto/price/{symbol}"
-    };
-  }
-
-  rpc GetBatchPrices(GetBatchPricesRequest) returns (GetBatchPricesResponse) {
-    option (google.api.http) = {
-      get: "/v1/crypto/prices"
-    };
-  }
-}
-
-message GetCurrentPriceRequest {
-  string symbol = 1;
-}
-
-message GetCurrentPriceResponse {
-  string symbol = 1;
-  double price_usd = 2;
-  google.protobuf.Timestamp timestamp = 3;
-}
-
-message GetBatchPricesRequest {
-  repeated string symbols = 1;
-}
-
-message GetBatchPricesResponse {
-  repeated PriceData prices = 1;
-}
-
-message PriceData {
-  string symbol = 1;
-  double price_usd = 2;
-  google.protobuf.Timestamp timestamp = 3;
+  rpc ListCryptos(ListCryptosRequest) returns (ListCryptosResponse) {}
 }

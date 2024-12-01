@@ -13,20 +13,29 @@ import (
 )
 
 type Server struct {
-	cfg        *config.Config
-	grpcServer *grpc.Server
-	httpServer *http.Server
-	cryptoSvc  *service.CryptoService
-	tracer     trace.Tracer
+	Cfg           *config.Config
+	GrpcServer    *grpc.Server
+	HttpServer    *http.Server
+	CryptoService *service.CryptoService
+	Tracer        trace.Tracer
 }
 
-func New(cfg *config.Config, cryptoSvc *service.CryptoService) *Server {
-	return &Server{
-		cfg:       cfg,
-		cryptoSvc: cryptoSvc,
+func New(cfg *config.Config, cryptoService *service.CryptoService) *Server {
+	srv := &Server{
+		Cfg:           cfg,
+		CryptoService: cryptoService,
 	}
-}
 
+	if err := srv.initGRPC(); err != nil {
+		panic(fmt.Sprintf("failed to init gRPC server: %v", err))
+	}
+	
+	if err := srv.initHTTP(); err != nil {
+		panic(fmt.Sprintf("failed to init HTTP server: %v", err))
+	}
+
+	return srv
+}
 func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		if err := s.startGRPC(); err != nil {
@@ -45,19 +54,19 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) startGRPC() error {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", s.cfg.Server.GRPCPort))
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", s.Cfg.Server.GRPCPort))
 	if err != nil {
 		return fmt.Errorf("failed to listen: %v", err)
 	}
 
-	return s.grpcServer.Serve(lis)
+	return s.GrpcServer.Serve(lis)
 }
 
 func (s *Server) startHTTP() error {
-	return s.httpServer.ListenAndServe()
+	return s.HttpServer.ListenAndServe()
 }
 
 func (s *Server) Shutdown() error {
-	s.grpcServer.GracefulStop()
-	return s.httpServer.Shutdown(context.Background())
+	s.GrpcServer.GracefulStop()
+	return s.HttpServer.Shutdown(context.Background())
 }

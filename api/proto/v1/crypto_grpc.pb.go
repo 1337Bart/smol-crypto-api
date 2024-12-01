@@ -19,16 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CryptoService_GetCurrentPrice_FullMethodName = "/crypto.v1.CryptoService/GetCurrentPrice"
-	CryptoService_GetBatchPrices_FullMethodName  = "/crypto.v1.CryptoService/GetBatchPrices"
+	CryptoService_ListCryptos_FullMethodName = "/crypto.v1.CryptoService/ListCryptos"
 )
 
 // CryptoServiceClient is the client API for CryptoService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Service definition
 type CryptoServiceClient interface {
-	GetCurrentPrice(ctx context.Context, in *GetCurrentPriceRequest, opts ...grpc.CallOption) (*GetCurrentPriceResponse, error)
-	GetBatchPrices(ctx context.Context, in *GetBatchPricesRequest, opts ...grpc.CallOption) (*GetBatchPricesResponse, error)
+	ListCryptos(ctx context.Context, in *ListCryptosRequest, opts ...grpc.CallOption) (*ListCryptosResponse, error)
 }
 
 type cryptoServiceClient struct {
@@ -39,20 +39,10 @@ func NewCryptoServiceClient(cc grpc.ClientConnInterface) CryptoServiceClient {
 	return &cryptoServiceClient{cc}
 }
 
-func (c *cryptoServiceClient) GetCurrentPrice(ctx context.Context, in *GetCurrentPriceRequest, opts ...grpc.CallOption) (*GetCurrentPriceResponse, error) {
+func (c *cryptoServiceClient) ListCryptos(ctx context.Context, in *ListCryptosRequest, opts ...grpc.CallOption) (*ListCryptosResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetCurrentPriceResponse)
-	err := c.cc.Invoke(ctx, CryptoService_GetCurrentPrice_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *cryptoServiceClient) GetBatchPrices(ctx context.Context, in *GetBatchPricesRequest, opts ...grpc.CallOption) (*GetBatchPricesResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetBatchPricesResponse)
-	err := c.cc.Invoke(ctx, CryptoService_GetBatchPrices_FullMethodName, in, out, cOpts...)
+	out := new(ListCryptosResponse)
+	err := c.cc.Invoke(ctx, CryptoService_ListCryptos_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +52,10 @@ func (c *cryptoServiceClient) GetBatchPrices(ctx context.Context, in *GetBatchPr
 // CryptoServiceServer is the server API for CryptoService service.
 // All implementations must embed UnimplementedCryptoServiceServer
 // for forward compatibility.
+//
+// Service definition
 type CryptoServiceServer interface {
-	GetCurrentPrice(context.Context, *GetCurrentPriceRequest) (*GetCurrentPriceResponse, error)
-	GetBatchPrices(context.Context, *GetBatchPricesRequest) (*GetBatchPricesResponse, error)
+	ListCryptos(context.Context, *ListCryptosRequest) (*ListCryptosResponse, error)
 	mustEmbedUnimplementedCryptoServiceServer()
 }
 
@@ -75,11 +66,8 @@ type CryptoServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedCryptoServiceServer struct{}
 
-func (UnimplementedCryptoServiceServer) GetCurrentPrice(context.Context, *GetCurrentPriceRequest) (*GetCurrentPriceResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetCurrentPrice not implemented")
-}
-func (UnimplementedCryptoServiceServer) GetBatchPrices(context.Context, *GetBatchPricesRequest) (*GetBatchPricesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetBatchPrices not implemented")
+func (UnimplementedCryptoServiceServer) ListCryptos(context.Context, *ListCryptosRequest) (*ListCryptosResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListCryptos not implemented")
 }
 func (UnimplementedCryptoServiceServer) mustEmbedUnimplementedCryptoServiceServer() {}
 func (UnimplementedCryptoServiceServer) testEmbeddedByValue()                       {}
@@ -102,38 +90,20 @@ func RegisterCryptoServiceServer(s grpc.ServiceRegistrar, srv CryptoServiceServe
 	s.RegisterService(&CryptoService_ServiceDesc, srv)
 }
 
-func _CryptoService_GetCurrentPrice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetCurrentPriceRequest)
+func _CryptoService_ListCryptos_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCryptosRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(CryptoServiceServer).GetCurrentPrice(ctx, in)
+		return srv.(CryptoServiceServer).ListCryptos(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: CryptoService_GetCurrentPrice_FullMethodName,
+		FullMethod: CryptoService_ListCryptos_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CryptoServiceServer).GetCurrentPrice(ctx, req.(*GetCurrentPriceRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _CryptoService_GetBatchPrices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetBatchPricesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CryptoServiceServer).GetBatchPrices(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: CryptoService_GetBatchPrices_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CryptoServiceServer).GetBatchPrices(ctx, req.(*GetBatchPricesRequest))
+		return srv.(CryptoServiceServer).ListCryptos(ctx, req.(*ListCryptosRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -146,12 +116,8 @@ var CryptoService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*CryptoServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "GetCurrentPrice",
-			Handler:    _CryptoService_GetCurrentPrice_Handler,
-		},
-		{
-			MethodName: "GetBatchPrices",
-			Handler:    _CryptoService_GetBatchPrices_Handler,
+			MethodName: "ListCryptos",
+			Handler:    _CryptoService_ListCryptos_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

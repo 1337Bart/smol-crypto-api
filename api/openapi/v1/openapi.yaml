@@ -1,18 +1,26 @@
 openapi: 3.0.0
 info:
-  title: Smol-crypto-API
+  title: Crypto API
   version: 1.0.0
-  description: API for cryptocurrency application (made for training purposes)
+  description: API for cryptocurrency data
+
 paths:
-  /v1/crypto/price/{symbol}:
+  /api/v1/crypto:
     get:
-      summary: Get current price for a cryptocurrency
+      summary: List all tracked cryptocurrencies
       parameters:
-        - name: symbol
-          in: path
-          required: true
+        - in: query
+          name: page
           schema:
-            type: string
+            type: integer
+            default: 1
+          description: Page number
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+          description: Number of items per page
       responses:
         '200':
           description: Successful response
@@ -21,10 +29,46 @@ paths:
               schema:
                 type: object
                 properties:
-                  symbol:
-                    type: string
-                  price:
-                    type: number
-                  timestamp:
-                    type: string
-                    format: date-time
+                  cryptos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Crypto'
+                  total_count:
+                    type: integer
+                  current_page:
+                    type: integer
+
+components:
+  schemas:
+    Crypto:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        current_price:
+          type: number
+        high_24h:
+          type: number
+        low_24h:
+          type: number
+        total_volume:
+          type: number
+        market_cap:
+          type: number
+        market_rank:
+          type: integer
+        price_change_24h:
+          type: number
+        price_change_percentage_24h:
+          type: number
+        circulating_supply:
+          type: number
+        total_supply:
+          type: number
+        timestamp:
+          type: string
+          format: date-time

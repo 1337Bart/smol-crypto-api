@@ -1,4 +1,4 @@
-package coingecko
+package coingecko_client
 
 import (
 	"fmt"
