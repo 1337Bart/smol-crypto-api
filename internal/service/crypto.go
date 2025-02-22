@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
+	"time"
+
 	"github.com/1337Bart/smol-crypto-api/internal/coingecko_client"
 	"github.com/1337Bart/smol-crypto-api/internal/model"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/postgres"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/redis"
-	"log"
-	"sort"
-	"time"
 )
 
 type ICryptoService interface {
@@ -54,7 +54,6 @@ func (s *CryptoService) StartPeriodicUpdates(ctx context.Context) {
 	}
 }
 
-// testing one-time update, in prod this will be replaced by StartPeriodicUpdates
 func (s *CryptoService) UpdateCryptosSingle(ctx context.Context) {
 	if err := s.updatePrices(ctx); err != nil {
 		log.Printf("Initial price update failed: %v", err)
@@ -69,12 +68,10 @@ func (s *CryptoService) updatePrices(ctx context.Context) error {
 	}
 
 	// Store in Redis (hot data)
-	if err := s.cache.BatchSave(ctx, cryptoData); err != nil {
+	if err := s.cache.SetCryptos(ctx, cryptoData); err != nil {
 		log.Printf("Failed to store cryptoData in Redis: %v", err)
-		// Continue execution even if Redis fails
 	}
 
-	// Store in PostgreSQL (historical data)
 	if err := s.repository.BatchSave(ctx, cryptoData); err != nil {
 		return fmt.Errorf("failed to store cryptoData in PostgreSQL: %w", err)
 	}
@@ -82,53 +79,36 @@ func (s *CryptoService) updatePrices(ctx context.Context) error {
 	return nil
 }
 
-const (
-	pageCacheKeyFormat = "crypto:page:%d:%d" // Format: crypto:page:{pageNum}:{limit}
-	cacheDuration      = 4 * time.Hour
-)
-
-// to jest pojebane:
-// trzeba dopisac metody do repo/cache
-// poprawic syntax
-// chce wyciagac PER PAGE, a nie WSZYSTKO wiec to jest do zaorania
-// po co mi total wyników??
 func (s *CryptoService) ListCryptos(ctx context.Context, page, limit int) ([]model.CryptoData, int, error) {
-	// Calculate offset
-	offset := (page - 1) * limit
-
-	// Try to get from Redis first (we'll get all data and paginate in memory since it's max 250 items)
-	cryptos, err := s.cache.GetAllCryptos(ctx)
-	if err == nil && len(cryptos) > 0 {
-		// Sort by market rank
-		sort.Slice(cryptos, func(i, j int) bool {
-			return cryptos[i].MarketRank < cryptos[j].MarketRank
-		})
-
-		// Calculate total and apply pagination
-		total := len(cryptos)
-		end := offset + limit
-		if end > total {
-			end = total
-		}
-
-		if offset >= total {
-			return []model.CryptoData{}, total, nil
-		}
-
-		return cryptos[offset:end], total, nil
+	if page < 1 {
+		return nil, 0, fmt.Errorf("page must be greater than 0")
+	}
+	if limit < 1 {
+		return nil, 0, fmt.Errorf("limit must be greater than 0")
 	}
 
-	// If not in Redis, get from PostgreSQL
-	// musze sprawdzic ze ten path działa do wyciągania danych
-	cryptos, err = s.repository.ListCryptos(ctx, offset, limit)
+	offset := (page - 1) * limit
+
+	// try redis
+	cryptos, total, err := s.cache.GetCryptosWithPagination(ctx, offset, limit)
+	if err == nil {
+		return cryptos, total, nil
+	}
+
+	// try database if redis fails
+	cryptos, total, err = s.repository.ListCryptos(ctx, offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list cryptos from repository: %w", err)
 	}
 
-	// Sort by market rank
-	sort.Slice(cryptos, func(i, j int) bool {
-		return cryptos[i].MarketRank < cryptos[j].MarketRank
-	})
+	// asynchronously update Redis cache with the new data
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.cache.SetCryptos(ctx, cryptos); err != nil {
+			log.Printf("failed to update cache: %v", err)
+		}
+	}()
 
-	return cryptos, 250, nil // hardcoded total as we know it's always 250
+	return cryptos, total, nil
 }

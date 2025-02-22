@@ -4,13 +4,13 @@ import (
 	"context"
 
 	cryptov1 "github.com/1337Bart/smol-crypto-api/api/proto/v1"
-	"github.com/1337Bart/smol-crypto-api/internal/handlers/grpc_handler"
+	"github.com/1337Bart/smol-crypto-api/internal/handlers"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
 
 func (s *Server) initGRPC() error {
-	grpcHandler := grpc_handler.NewCryptoHandler(*s.CryptoService)
+	grpcHandler := handlers.NewCryptoHandler(*s.CryptoService)
 
 	server := grpc.NewServer(
 		grpc.UnaryInterceptor(s.unaryInterceptor()),

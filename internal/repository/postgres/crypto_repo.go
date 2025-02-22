@@ -4,15 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/1337Bart/smol-crypto-api/internal/model"
 	"log"
+
+	"github.com/1337Bart/smol-crypto-api/internal/model"
 )
 
 const logEveryNRecords = 25
 
 type ICryptoRepository interface {
 	BatchSave(ctx context.Context, prices []model.CryptoData) error
-	ListCryptos(ctx context.Context, offset, limit int) ([]model.CryptoData, error)
+	ListCryptos(ctx context.Context, offset, limit int) ([]model.CryptoData, int, error)
 }
 
 type cryptoRepository struct {
@@ -64,22 +65,45 @@ func (r *cryptoRepository) BatchSave(ctx context.Context, prices []model.CryptoD
 	return tx.Commit()
 }
 
-// ta querka musi zwracac dane historyczne, a nie zwraca nic
-func (r *cryptoRepository) ListCryptos(ctx context.Context, offset, limit int) ([]model.CryptoData, error) {
-	query := ` 
-        SELECT DISTINCT ON (id)  
-            id, symbol, name, timestamp, current_price, high_24h, low_24h, 
-            total_volume, market_cap, market_cap_rank, price_change_24h, 
-            price_change_percentage_24h, circulating_supply, total_supply 
-        FROM crypto_data 
-        WHERE timestamp >= NOW() - INTERVAL '4 hours'
-        ORDER BY id, timestamp DESC, market_cap_rank ASC 
-        LIMIT $1 OFFSET $2 
-    `
-
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+func (r *cryptoRepository) ListCryptos(ctx context.Context, offset, limit int) ([]model.CryptoData, int, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelRepeatableRead,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query cryptos: %w", err)
+		return nil, 0, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var total int
+	countQuery := `
+       SELECT COUNT(DISTINCT id)
+       FROM crypto_prices
+       WHERE timestamp >= NOW() - INTERVAL '4 hours'
+   `
+	err = tx.QueryRowContext(ctx, countQuery).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get total count: %w", err)
+	}
+
+	query := `
+       WITH RankedCryptos AS (
+           SELECT DISTINCT ON (id)
+               id, symbol, name, timestamp, current_price, high_24h, low_24h,
+               total_volume, market_cap, market_rank, price_change_24h,
+               price_change_percentage_24h, circulating_supply, total_supply
+           FROM crypto_prices
+           WHERE timestamp >= NOW() - INTERVAL '4 hours'
+           ORDER BY id, timestamp DESC
+       )
+       SELECT *
+       FROM RankedCryptos
+       ORDER BY market_rank ASC NULLS LAST, id ASC
+       LIMIT $1 OFFSET $2
+   `
+
+	rows, err := tx.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query cryptos: %w", err)
 	}
 	defer rows.Close()
 
@@ -94,14 +118,18 @@ func (r *cryptoRepository) ListCryptos(ctx context.Context, offset, limit int) (
 			&crypto.CirculatingSupply, &crypto.TotalSupply,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan crypto row: %w", err)
+			return nil, 0, fmt.Errorf("failed to scan crypto row: %w", err)
 		}
 		cryptos = append(cryptos, crypto)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating crypto rows: %w", err)
+		return nil, 0, fmt.Errorf("error iterating crypto rows: %w", err)
 	}
 
-	return cryptos, nil
+	if err = tx.Commit(); err != nil {
+		return nil, 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return cryptos, total, nil
 }

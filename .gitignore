@@ -23,3 +23,8 @@ vendor/
 # Generated files
 gen/
 EOL
+
+.vscode
+bin/
+local/
+passwd

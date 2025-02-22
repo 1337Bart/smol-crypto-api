@@ -21,5 +21,3 @@ type CryptoData struct {
 	CirculatingSupply float64 `json:"circulating_supply"`
 	TotalSupply       float64 `json:"total_supply"`
 }
-
-// todo: circulating i total supply moga byc w innej tabeli albo w ogole moze ich nie byc (rzadko sie zmieniają)
