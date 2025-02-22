@@ -23,10 +23,10 @@ type ICryptoService interface {
 
 type CryptoService struct {
 	cache      redis.CryptoCache
-	repository postgres.CryptoRepository
+	repository postgres.ICryptoRepository
 }
 
-func NewCryptoService(cache redis.CryptoCache, repository postgres.CryptoRepository) *CryptoService {
+func NewCryptoService(cache redis.CryptoCache, repository postgres.ICryptoRepository) *CryptoService {
 	return &CryptoService{
 		cache:      cache,
 		repository: repository,
@@ -119,6 +119,7 @@ func (s *CryptoService) ListCryptos(ctx context.Context, page, limit int) ([]mod
 	}
 
 	// If not in Redis, get from PostgreSQL
+	// musze sprawdzic ze ten path działa do wyciągania danych
 	cryptos, err = s.repository.ListCryptos(ctx, offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list cryptos from repository: %w", err)

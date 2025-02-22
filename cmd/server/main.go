@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/postgres"
-
 	"github.com/1337Bart/smol-crypto-api/internal/service"
 	"log"
 

@@ -64,6 +64,7 @@ func (r *cryptoRepository) BatchSave(ctx context.Context, prices []model.CryptoD
 	return tx.Commit()
 }
 
+// ta querka musi zwracac dane historyczne, a nie zwraca nic
 func (r *cryptoRepository) ListCryptos(ctx context.Context, offset, limit int) ([]model.CryptoData, error) {
 	query := ` 
         SELECT DISTINCT ON (id)  
@@ -71,7 +72,7 @@ func (r *cryptoRepository) ListCryptos(ctx context.Context, offset, limit int) (
             total_volume, market_cap, market_cap_rank, price_change_24h, 
             price_change_percentage_24h, circulating_supply, total_supply 
         FROM crypto_data 
-        WHERE timestamp >= NOW() - INTERVAL '4 hours' 
+        WHERE timestamp >= NOW() - INTERVAL '4 hours'
         ORDER BY id, timestamp DESC, market_cap_rank ASC 
         LIMIT $1 OFFSET $2 
     `

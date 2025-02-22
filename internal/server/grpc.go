@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+
 	cryptov1 "github.com/1337Bart/smol-crypto-api/api/proto/v1"
 	"github.com/1337Bart/smol-crypto-api/internal/handlers/grpc_handler"
 	"google.golang.org/grpc"
@@ -17,7 +18,6 @@ func (s *Server) initGRPC() error {
 
 	cryptov1.RegisterCryptoServiceServer(server, grpcHandler)
 
-	// Enable reflection for grpcurl - co to robi??
 	reflection.Register(server)
 
 	s.GrpcServer = server

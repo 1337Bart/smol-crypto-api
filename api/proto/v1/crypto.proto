@@ -4,14 +4,18 @@ package crypto.v1;
 option go_package = "github.com/1337Bart/smol-crypto-api/api/proto/v1;cryptopb";
 
 import "google/protobuf/timestamp.proto";
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
-// Message for pagination
-message PaginationRequest {
-  int32 page = 1;
-  int32 limit = 2;
-}
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Crypto API";
+    version: "1.0.0";
+  }
+};
 
-// Crypto data message
+
 message Crypto {
   string id = 1;
   string symbol = 2;
@@ -29,19 +33,32 @@ message Crypto {
   string timestamp = 14;
 }
 
-// Request for listing cryptos
 message ListCryptosRequest {
-  PaginationRequest pagination = 1;
+  PaginationRequest pagination = 1 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// Response for listing cryptos
+message PaginationRequest {
+  int32 page = 1 [(google.api.field_behavior) = OPTIONAL];
+  int32 limit = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
 message ListCryptosResponse {
   repeated Crypto cryptos = 1;
   int32 total_count = 2;
   int32 current_page = 3;
 }
 
-// Service definition
 service CryptoService {
-  rpc ListCryptos(ListCryptosRequest) returns (ListCryptosResponse) {}
+  rpc ListCryptos(ListCryptosRequest) returns (ListCryptosResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/crypto"
+      additional_bindings {
+        get: "/v1/crypto"
+      }
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List all tracked cryptocurrencies"
+      description: "Get a paginated list of all cryptocurrencies"
+    };
+  }
 }

@@ -21,3 +21,10 @@ buf generate
 # Curl
 curl "http://localhost:8080/api/v1/crypto?page=2&limit=20" 
 
+
+Do zrobienia jako kolejne:
+- upewnic sie, ze postgres dziala gdy redis nie ma danych, albo gdy request jest o dane historyczne
+- następne endpointy
+- telemetry (porównanie szybkości redis vs postgres)
+- frontend dla http, moze też dla grpc?? research
+- dodatkowe endpointy z fajnymi metryczkami 
