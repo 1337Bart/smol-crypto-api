@@ -35,6 +35,9 @@ message Crypto {
 
 message ListCryptosRequest {
   PaginationRequest pagination = 1 [(google.api.field_behavior) = OPTIONAL];
+  string symbol = 2 [(google.api.field_behavior) = OPTIONAL];
+  google.protobuf.Timestamp start_time = 3 [(google.api.field_behavior) = OPTIONAL];
+  google.protobuf.Timestamp end_time = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 message PaginationRequest {

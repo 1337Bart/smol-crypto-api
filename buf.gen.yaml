@@ -1,16 +1,16 @@
 version: v1
 plugins:
   - plugin: go
-    out: api/proto/v1
+    out: api/proto/
     opt: paths=source_relative
   - plugin: go-grpc
-    out: api/proto/v1
+    out: api/proto/
     opt: paths=source_relative
   - plugin: grpc-gateway
-    out: api/proto/v1
+    out: api/proto/
     opt: paths=source_relative
   - plugin: openapiv2
-    out: api/proto/v1
+    out: api/proto/
     opt:
       - allow_merge=true
       - merge_file_name=api

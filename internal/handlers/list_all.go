@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/1337Bart/smol-crypto-api/api/proto/v1"
+	v1 "github.com/1337Bart/smol-crypto-api/api/proto/v1"
+	"github.com/1337Bart/smol-crypto-api/internal/model"
 	"github.com/1337Bart/smol-crypto-api/internal/service"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -22,19 +23,41 @@ func NewCryptoHandler(service service.CryptoService) *CryptoHandler {
 }
 
 func (h *CryptoHandler) ListCryptos(ctx context.Context, req *v1.ListCryptosRequest) (*v1.ListCryptosResponse, error) {
-	page := int32(1)
-	limit := int32(10)
+	filter := model.CryptoFilter{
+		Page:  1,
+		Limit: 10,
+	}
 
 	if req.Pagination != nil {
 		if req.Pagination.Page > 0 {
-			page = req.Pagination.Page
+			filter.Page = int(req.Pagination.Page)
 		}
 		if req.Pagination.Limit > 0 && req.Pagination.Limit <= 100 {
-			limit = req.Pagination.Limit
+			filter.Limit = int(req.Pagination.Limit)
 		}
 	}
 
-	cryptos, total, err := h.service.ListCryptos(ctx, int(page), int(limit))
+	if req.Symbol != "" {
+		filter.Symbol = req.Symbol
+	}
+
+	if req.StartTime != nil {
+		startTime := req.StartTime.AsTime()
+		filter.StartTime = &startTime
+	}
+
+	if req.EndTime != nil {
+		endTime := req.EndTime.AsTime()
+		filter.EndTime = &endTime
+	}
+
+	if filter.StartTime != nil && filter.EndTime != nil {
+		if filter.StartTime.After(*filter.EndTime) {
+			return nil, status.Error(codes.InvalidArgument, "start_time must be before end_time")
+		}
+	}
+
+	cryptos, total, err := h.service.ListCryptos(ctx, filter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to fetch cryptos: %v", err)
 	}
@@ -42,7 +65,7 @@ func (h *CryptoHandler) ListCryptos(ctx context.Context, req *v1.ListCryptosRequ
 	response := &v1.ListCryptosResponse{
 		Cryptos:     make([]*v1.Crypto, 0, len(cryptos)),
 		TotalCount:  int32(total),
-		CurrentPage: page,
+		CurrentPage: int32(filter.Page),
 	}
 
 	for _, crypto := range cryptos {

@@ -4,7 +4,7 @@
 // - protoc             (unknown)
 // source: v1/crypto.proto
 
-package v1
+package cryptopb
 
 import (
 	context "context"
@@ -25,8 +25,6 @@ const (
 // CryptoServiceClient is the client API for CryptoService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// Service definition
 type CryptoServiceClient interface {
 	ListCryptos(ctx context.Context, in *ListCryptosRequest, opts ...grpc.CallOption) (*ListCryptosResponse, error)
 }
@@ -52,8 +50,6 @@ func (c *cryptoServiceClient) ListCryptos(ctx context.Context, in *ListCryptosRe
 // CryptoServiceServer is the server API for CryptoService service.
 // All implementations must embed UnimplementedCryptoServiceServer
 // for forward compatibility.
-//
-// Service definition
 type CryptoServiceServer interface {
 	ListCryptos(context.Context, *ListCryptosRequest) (*ListCryptosResponse, error)
 	mustEmbedUnimplementedCryptoServiceServer()

@@ -18,7 +18,7 @@ type ICryptoService interface {
 	UpdateCryptosSingle(ctx context.Context)
 
 	// handler operations
-	ListCryptos(ctx context.Context, page, limit int) ([]model.CryptoData, int, error)
+	ListCryptos(ctx context.Context, filter model.CryptoFilter) ([]model.CryptoData, int, error)
 }
 
 type CryptoService struct {
@@ -67,7 +67,7 @@ func (s *CryptoService) updatePrices(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch cryptoData: %w", err)
 	}
 
-	// Store in Redis (hot data)
+	// store in Redis (hot data)
 	if err := s.cache.SetCryptos(ctx, cryptoData); err != nil {
 		log.Printf("Failed to store cryptoData in Redis: %v", err)
 	}
@@ -79,36 +79,38 @@ func (s *CryptoService) updatePrices(ctx context.Context) error {
 	return nil
 }
 
-func (s *CryptoService) ListCryptos(ctx context.Context, page, limit int) ([]model.CryptoData, int, error) {
-	if page < 1 {
+func (s *CryptoService) ListCryptos(ctx context.Context, filter model.CryptoFilter) ([]model.CryptoData, int, error) {
+	if filter.Page < 1 {
 		return nil, 0, fmt.Errorf("page must be greater than 0")
 	}
-	if limit < 1 {
+	if filter.Limit < 1 {
 		return nil, 0, fmt.Errorf("limit must be greater than 0")
 	}
 
-	offset := (page - 1) * limit
+	offset := (filter.Page - 1) * filter.Limit
 
-	// try redis
-	cryptos, total, err := s.cache.GetCryptosWithPagination(ctx, offset, limit)
-	if err == nil {
-		return cryptos, total, nil
+	if filter.Symbol == "" && filter.StartTime == nil && filter.EndTime == nil {
+		cryptos, total, err := s.cache.GetCryptosWithPagination(ctx, offset, filter.Limit)
+		if err == nil {
+			return cryptos, total, nil
+		}
 	}
 
-	// try database if redis fails
-	cryptos, total, err = s.repository.ListCryptos(ctx, offset, limit)
+	cryptos, total, err := s.repository.ListCryptos(ctx, filter, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list cryptos from repository: %w", err)
 	}
 
-	// asynchronously update Redis cache with the new data
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := s.cache.SetCryptos(ctx, cryptos); err != nil {
-			log.Printf("failed to update cache: %v", err)
-		}
-	}()
+	// only cache if we're getting the latest data (no filters)
+	if filter.Symbol == "" && filter.StartTime == nil && filter.EndTime == nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := s.cache.SetCryptos(ctx, cryptos); err != nil {
+				log.Printf("failed to update cache: %v", err)
+			}
+		}()
+	}
 
 	return cryptos, total, nil
 }

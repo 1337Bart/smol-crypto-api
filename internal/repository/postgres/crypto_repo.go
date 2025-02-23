@@ -13,7 +13,7 @@ const logEveryNRecords = 25
 
 type ICryptoRepository interface {
 	BatchSave(ctx context.Context, prices []model.CryptoData) error
-	ListCryptos(ctx context.Context, offset, limit int) ([]model.CryptoData, int, error)
+	ListCryptos(ctx context.Context, filter model.CryptoFilter, offset int) ([]model.CryptoData, int, error)
 }
 
 type cryptoRepository struct {
@@ -21,6 +21,14 @@ type cryptoRepository struct {
 }
 
 func NewCryptoRepository(db *sql.DB) ICryptoRepository {
+	_, err := db.Exec(` 
+        CREATE INDEX IF NOT EXISTS idx_crypto_prices_symbol_timestamp  
+        ON crypto_prices (symbol, timestamp DESC) 
+    `)
+	if err != nil {
+		log.Printf("Failed to create index: %v", err)
+	}
+
 	return &cryptoRepository{db: db}
 }
 
@@ -65,7 +73,7 @@ func (r *cryptoRepository) BatchSave(ctx context.Context, prices []model.CryptoD
 	return tx.Commit()
 }
 
-func (r *cryptoRepository) ListCryptos(ctx context.Context, offset, limit int) ([]model.CryptoData, int, error) {
+func (r *cryptoRepository) ListCryptos(ctx context.Context, filter model.CryptoFilter, offset int) ([]model.CryptoData, int, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 	})
@@ -74,40 +82,67 @@ func (r *cryptoRepository) ListCryptos(ctx context.Context, offset, limit int) (
 	}
 	defer tx.Rollback()
 
+	// Base query
+	query := ` 
+        SELECT id, symbol, name, timestamp, current_price, high_24h, low_24h, 
+               total_volume, market_cap, market_rank, price_change_24h, 
+               price_change_percentage_24h, circulating_supply, total_supply 
+        FROM crypto_prices 
+        WHERE 1=1 
+    `
+	countQuery := "SELECT COUNT(*) FROM crypto_prices WHERE 1=1"
+
+	params := []interface{}{}
+	paramCount := 1
+
+	// Add filters
+	if filter.Symbol != "" {
+		whereClause := fmt.Sprintf(" AND symbol = $%d", paramCount)
+		query += whereClause
+		countQuery += whereClause
+		params = append(params, filter.Symbol)
+		paramCount++
+	}
+
+	if filter.StartTime != nil {
+		whereClause := fmt.Sprintf(" AND timestamp >= $%d", paramCount)
+		query += whereClause
+		countQuery += whereClause
+		params = append(params, filter.StartTime)
+		paramCount++
+	}
+
+	if filter.EndTime != nil {
+		whereClause := fmt.Sprintf(" AND timestamp <= $%d", paramCount)
+		query += whereClause
+		countQuery += whereClause
+		params = append(params, filter.EndTime)
+		paramCount++
+	}
+
+	// Add ordering and pagination to main query
+	query += " ORDER BY timestamp DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", paramCount, paramCount+1)
+
+	// Add pagination params
+	queryParams := append(params, filter.Limit, offset)
+
+	// Execute count query
 	var total int
-	countQuery := `
-       SELECT COUNT(DISTINCT id)
-       FROM crypto_prices
-       WHERE timestamp >= NOW() - INTERVAL '4 hours'
-   `
-	err = tx.QueryRowContext(ctx, countQuery).Scan(&total)
+	err = r.db.QueryRowContext(ctx, countQuery, params...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get total count: %w", err)
 	}
 
-	query := `
-       WITH RankedCryptos AS (
-           SELECT DISTINCT ON (id)
-               id, symbol, name, timestamp, current_price, high_24h, low_24h,
-               total_volume, market_cap, market_rank, price_change_24h,
-               price_change_percentage_24h, circulating_supply, total_supply
-           FROM crypto_prices
-           WHERE timestamp >= NOW() - INTERVAL '4 hours'
-           ORDER BY id, timestamp DESC
-       )
-       SELECT *
-       FROM RankedCryptos
-       ORDER BY market_rank ASC NULLS LAST, id ASC
-       LIMIT $1 OFFSET $2
-   `
-
-	rows, err := tx.QueryContext(ctx, query, limit, offset)
+	// Execute main query
+	rows, err := r.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query cryptos: %w", err)
 	}
 	defer rows.Close()
 
-	var cryptos []model.CryptoData
+	cryptos := make([]model.CryptoData, 0, filter.Limit)
+
 	for rows.Next() {
 		var crypto model.CryptoData
 		err := rows.Scan(
