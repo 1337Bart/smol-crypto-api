@@ -7,6 +7,8 @@ import (
 	"log"
 
 	"github.com/1337Bart/smol-crypto-api/internal/model"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const logEveryNRecords = 25
@@ -17,10 +19,11 @@ type ICryptoRepository interface {
 }
 
 type cryptoRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	tracer trace.Tracer
 }
 
-func NewCryptoRepository(db *sql.DB) ICryptoRepository {
+func NewCryptoRepository(db *sql.DB, tracer trace.Tracer) ICryptoRepository {
 	_, err := db.Exec(` 
         CREATE INDEX IF NOT EXISTS idx_crypto_prices_symbol_timestamp  
         ON crypto_prices (symbol, timestamp DESC) 
@@ -29,7 +32,10 @@ func NewCryptoRepository(db *sql.DB) ICryptoRepository {
 		log.Printf("Failed to create index: %v", err)
 	}
 
-	return &cryptoRepository{db: db}
+	return &cryptoRepository{
+		db:     db,
+		tracer: tracer,
+	}
 }
 
 func (r *cryptoRepository) BatchSave(ctx context.Context, prices []model.CryptoData) error {
@@ -74,6 +80,16 @@ func (r *cryptoRepository) BatchSave(ctx context.Context, prices []model.CryptoD
 }
 
 func (r *cryptoRepository) ListCryptos(ctx context.Context, filter model.CryptoFilter, offset int) ([]model.CryptoData, int, error) {
+	ctx, span := r.tracer.Start(ctx, "db_list_cryptos")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("filter.symbol", filter.Symbol),
+		attribute.Int("filter.limit", filter.Limit),
+		attribute.Int("filter.offset", offset),
+	)
+
+	log.Printf("Created span with trace ID: %s", span.SpanContext().TraceID().String())
+
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 	})
@@ -82,7 +98,6 @@ func (r *cryptoRepository) ListCryptos(ctx context.Context, filter model.CryptoF
 	}
 	defer tx.Rollback()
 
-	// Base query
 	query := ` 
         SELECT id, symbol, name, timestamp, current_price, high_24h, low_24h, 
                total_volume, market_cap, market_rank, price_change_24h, 
@@ -95,7 +110,6 @@ func (r *cryptoRepository) ListCryptos(ctx context.Context, filter model.CryptoF
 	params := []interface{}{}
 	paramCount := 1
 
-	// Add filters
 	if filter.Symbol != "" {
 		whereClause := fmt.Sprintf(" AND symbol = $%d", paramCount)
 		query += whereClause
@@ -120,21 +134,17 @@ func (r *cryptoRepository) ListCryptos(ctx context.Context, filter model.CryptoF
 		paramCount++
 	}
 
-	// Add ordering and pagination to main query
-	query += " ORDER BY timestamp DESC"
+	query += " ORDER BY market_rank ASC"
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", paramCount, paramCount+1)
 
-	// Add pagination params
 	queryParams := append(params, filter.Limit, offset)
 
-	// Execute count query
 	var total int
 	err = r.db.QueryRowContext(ctx, countQuery, params...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get total count: %w", err)
 	}
 
-	// Execute main query
 	rows, err := r.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query cryptos: %w", err)

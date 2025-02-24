@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/1337Bart/smol-crypto-api/internal/config"
 	"github.com/1337Bart/smol-crypto-api/internal/service"
@@ -20,37 +22,73 @@ type Server struct {
 	Tracer        trace.Tracer
 }
 
-func New(cfg *config.Config, cryptoService *service.CryptoService) *Server {
+func New(cfg *config.Config, cryptoService *service.CryptoService, tracer trace.Tracer) *Server {
 	srv := &Server{
 		Cfg:           cfg,
 		CryptoService: cryptoService,
+		Tracer:        tracer,
 	}
 
 	if err := srv.initGRPC(); err != nil {
 		panic(fmt.Sprintf("failed to init gRPC server: %v", err))
 	}
-	
+
 	if err := srv.initHTTP(); err != nil {
 		panic(fmt.Sprintf("failed to init HTTP server: %v", err))
 	}
 
 	return srv
 }
+
 func (s *Server) Start(ctx context.Context) error {
+	errChan := make(chan error, 2)
+
 	go func() {
-		if err := s.startGRPC(); err != nil {
-			fmt.Printf("Failed to start gRPC server: %v\n", err)
+		if err := s.startGRPC(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errChan <- fmt.Errorf("grpc server error: %w", err)
 		}
 	}()
 
 	go func() {
-		if err := s.startHTTP(); err != nil {
-			fmt.Printf("Failed to start HTTP server: %v\n", err)
+		if err := s.startHTTP(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errChan <- fmt.Errorf("http server error: %w", err)
 		}
 	}()
 
-	<-ctx.Done()
-	return s.Shutdown()
+	select {
+	case err := <-errChan:
+		return fmt.Errorf("server error: %w", err)
+	case <-ctx.Done():
+		return s.Shutdown()
+	}
+}
+
+func (s *Server) Shutdown() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	errChan := make(chan error, 2)
+
+	go func() {
+		s.GrpcServer.GracefulStop()
+		errChan <- nil
+	}()
+
+	go func() {
+		errChan <- s.HttpServer.Shutdown(ctx)
+	}()
+
+	var errs []error
+	for i := 0; i < 2; i++ {
+		if err := <-errChan; err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("shutdown errors: %v", errs)
+	}
+	return nil
 }
 
 func (s *Server) startGRPC() error {
@@ -64,9 +102,4 @@ func (s *Server) startGRPC() error {
 
 func (s *Server) startHTTP() error {
 	return s.HttpServer.ListenAndServe()
-}
-
-func (s *Server) Shutdown() error {
-	s.GrpcServer.GracefulStop()
-	return s.HttpServer.Shutdown(context.Background())
 }

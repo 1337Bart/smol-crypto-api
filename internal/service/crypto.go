@@ -10,6 +10,8 @@ import (
 	"github.com/1337Bart/smol-crypto-api/internal/model"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/postgres"
 	"github.com/1337Bart/smol-crypto-api/internal/repository/redis"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type ICryptoService interface {
@@ -24,12 +26,14 @@ type ICryptoService interface {
 type CryptoService struct {
 	cache      redis.CryptoCache
 	repository postgres.ICryptoRepository
+	tracer     trace.Tracer
 }
 
-func NewCryptoService(cache redis.CryptoCache, repository postgres.ICryptoRepository) *CryptoService {
+func NewCryptoService(cache redis.CryptoCache, repository postgres.ICryptoRepository, tracer trace.Tracer) *CryptoService {
 	return &CryptoService{
 		cache:      cache,
 		repository: repository,
+		tracer:     tracer,
 	}
 }
 
@@ -89,11 +93,26 @@ func (s *CryptoService) ListCryptos(ctx context.Context, filter model.CryptoFilt
 
 	offset := (filter.Page - 1) * filter.Limit
 
+	//if filter.Symbol == "" && filter.StartTime == nil && filter.EndTime == nil {
+	//	// to zwraca co potrzebuje ale bez paginacji
+	//	cryptos, err := s.cache.GetAllCryptos(ctx)
+	//	// to zwraca gowno
+	//	//cryptos, total, err := s.cache.GetCryptosWithPagination(ctx, offset, filter.Limit)
+	//	if err == nil {
+	//		return cryptos, 2, nil
+	//	}
+	//}
 	if filter.Symbol == "" && filter.StartTime == nil && filter.EndTime == nil {
-		cryptos, total, err := s.cache.GetCryptosWithPagination(ctx, offset, filter.Limit)
+		ctx, span := s.tracer.Start(ctx, "cache_get_cryptos")
+		defer span.End()
+
+		cryptos, err := s.cache.GetAllCryptos(ctx)
 		if err == nil {
-			return cryptos, total, nil
+			span.SetAttributes(attribute.Bool("cache.hit", true))
+			return cryptos, len(cryptos), nil
 		}
+		span.SetAttributes(attribute.Bool("cache.hit", false))
+		span.RecordError(err)
 	}
 
 	cryptos, total, err := s.repository.ListCryptos(ctx, filter, offset)

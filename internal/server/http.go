@@ -12,6 +12,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func (s *Server) initHTTP() error {
@@ -81,7 +82,8 @@ func (s *Server) initHTTP() error {
 	})
 
 	router := chi.NewRouter()
-	router.Mount("/", wrappedHandler)
+	handler := otelhttp.NewHandler(wrappedHandler, "http_server")
+	router.Mount("/", handler)
 
 	s.HttpServer = &http.Server{
 		Addr: fmt.Sprintf("%s:%s",
